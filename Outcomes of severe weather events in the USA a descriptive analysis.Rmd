@@ -1,0 +1,183 @@
+---
+title: 'Outcomes of severe weather events in the USA a descriptive analysis'
+author: "L"
+date: "9 12 2021"
+output:
+  pdf_document: default
+  html_document: default
+subtitle: A Report
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+```
+
+## Synopsis
+This paper offeres decision-makers to evaluate the outcomes of severe weather events in the USA. Two aspects are covered, namely which weather events causes major (1) harmful effects on population health in terms of injuries and deaths and (2) property and crop damage in terms of US.Dollar. Raw data is retrieved from the National Weather Service collecting comprehensive data since 2000's. Preprocessing, descriptively analysing and reporting was performed in R-Studio. Results show, by far, most people are hurt or killed by turnados and excessive heat. Thunderstorm wind, tornadoes and floods destroy mostly property and crops, almost 25 Billion US Dollar each in the end of the 2000's.  
+
+## Introduction
+
+Weather events can have a tremendous outcome on both population health in terms of injuries and deaths and on property, causing economically losses. Thus it is of great importance to prepare for severe weather events to prevent major consequences. As weather cannot be controlled and resources are scare, this paper aims to describe what events are most harmful to offer decision-makers objective and trustworthy reporting. Questions dealth with are:
+
+1. Across the United States, which types of events are most harmful with respect to population health? 
+2. Across the United States, which types of events have the greatest economic consequences?
+
+The whole process from retrieving data to preprocessing, analysing and summarizing is made publicily available. R-Studio was chosen to incorporate everything into one document making it reproducible by others.  
+
+## Method 
+### Accessing data and documentations
+
+The National Weather Service of the USA reports on weather events since the 1950's. However, comprehensive data collection only started in the 1990's. The database of the [National Centeres for Environmental Information](https://www.ncei.noaa.gov/) is freely accessible. Information on this [dataset](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) and how it was [collected](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf) were provided. All links were accessed on 9th of December, 2021. 
+
+### Processing Data
+
+For convenience, the dataset is stored in a [zip-file](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2). Packages to run this analysis were tidyverse and lubridate which needs to be loaded first.
+```{r packages}
+library(tidyverse)
+library(lubridate)
+library(knitr)
+```
+
+Loading the data can be made by the following, perhaps check `getwd()` first to know in which file the data will be loaded.
+```{r loading data}
+filename <- "repdata_data_StormData.csv"
+
+if (!file.exists(filename)){
+  download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2", filename)
+  unzip(filename)
+}
+
+data <- read.table(filename, header = T, sep="," , na.strings = "NA")
+``` 
+
+As it is raw data, it's necessary to understand what classes are used.
+```{r str}
+str(data)
+```
+
+As the data is historically stored and not comprehensive from 1950's it will be necessary to filter certain years. However, to do this, first, the dates of beginning and ending of weather events needs to be transformed to class 'date'. Moreover, the year of beginning is substracted.
+
+````{r transformation}
+#transforming
+data$BGN_DATE  <- as.Date(data$BGN_DATE, "%m/%d/%Y")
+data$END_DATE <- as.Date(data$END_DATE, "%m/%d/%Y")
+
+#mutating new columns
+data <- data %>% mutate(Year = format(BGN_DATE, "%Y"))
+
+```
+
+The weather event is reported in the column `EVTYPE`. To answer question 1 columns `FATALITIES` and `INJURIES` are used. To answer question 2 `PROPDMG`, `PROPDMGEXP`, `CROPDMG` and `CROPDMGEXP` are used. The shortcut 'Prop' documents costs of damage to property whereas 'crop' documents the costs of damage to crops. Please note the digits within the EXP-columns. These signify the magnitude of damage caused in either K = thousand, B = Billion and M = Million. To cover this, new columns are mutated to make calculations easier. 
+
+
+```{r costs}
+data <- data %>%
+    mutate(PROP_COSTS = 
+             case_when(
+               PROPDMGEXP   == "K" ~ PROPDMG * 100000,
+                PROPDMGEXP  == "M" ~ PROPDMG * 1000000,
+                  PROPDMGEXP  == "B" ~ PROPDMG * 1000000000,
+                    TRUE ~ PROPDMG
+               ),
+           CROP_COSTS = 
+             case_when (CROPDMGEXP == "K" ~ CROPDMG * 100000,
+                          CROPDMGEXP == "M" ~ CROPDMG * 1000000,
+                           CROPDMGEXP == "B" ~ CROPDMG * 1000000000,
+                            TRUE ~ CROPDMG
+                        )
+               
+             )
+
+```
+
+## Results 
+
+*Population Health*
+
+As there are 900+ event types in this data set, this first result shows top 10 weather events impacting human health.
+
+```{r top10health}
+eventoccurence <- data %>% filter(Year >= 2000) %>%  
+        group_by(EVTYPE) %>% 
+        summarise(freq = n_distinct(BGN_DATE), 
+                  tot_inj = sum(INJURIES),
+                  tot_fat = sum(FATALITIES),
+                  tot_health = sum(FATALITIES) + sum(INJURIES)) %>% 
+        arrange(desc(tot_health))
+
+healthevents5 <- head(eventoccurence$EVTYPE,5)
+
+deaths <- eventoccurence[1,4]
+injuries <- eventoccurence[1,3]
+
+kable(head(eventoccurence,10))
+
+
+
+```
+
+
+Most impact on population health ever since 2000 has the event type tornados, causing highest number of deaths (n = `r toString(deaths)`) and by far greatest amount of injuries (n = `r toString(injuries)`).  
+
+```{r population health}
+# aggregate per year
+dataplot <- data %>% filter(Year >= 2000 & EVTYPE %in% healthevents5) %>%  
+  group_by(EVTYPE, Year) %>% 
+  summarise(freq = n_distinct(BGN_DATE), 
+            tot_inj = sum(INJURIES),
+            tot_fat = sum(FATALITIES),
+            tot_health = sum(FATALITIES) + sum(INJURIES)) %>% 
+  arrange(desc(tot_health))
+
+# show panel plot 
+
+ dataplot %>% 
+  ggplot(aes(x=tot_fat, y= tot_inj, color = EVTYPE, size= 0.1))+
+  geom_point() +
+  facet_wrap(~Year) +
+  labs (x = "Number of deaths", y= "Number of Injuries", 
+        title="Weather Events on human injuries and deaths",
+        subtitle = "Reported in the USA since 2000")
+
+```
+
+In this figure, it becomes clear that in the decade of 2000 tornados caused most injuries whereas excessive heat killed people at most. Thunderstorm wind, TSTM wind and lightning all share throughout this decade same number of injures and deaths as they all gather around <100 deaths and <1000 injuries. Only in the last year of data collection from this dataset, in 2011, a tornardo is by far top 1 severe weather event impacting population health.
+
+*Economical Costs due to damage*
+
+Same amount of possible events is there for economical burden thus following figure is limited to top 10 most costly severe weather events. 
+
+```{r top 10 economic}
+
+ecoevent <- data %>% filter(Year >= 2000) %>%  
+      group_by(EVTYPE) %>% 
+      summarise(freq = n_distinct(BGN_DATE), 
+                tot_prop = sum(PROP_COSTS),
+                tot_crop = sum(CROP_COSTS),
+                tot = sum(PROP_COSTS) + sum(CROP_COSTS)) %>% 
+      arrange( desc(tot))
+
+ecoevents <- head(ecoevent$EVTYPE, 10)
+
+dataplotcosts <- data %>% filter(Year >= 2000 & EVTYPE %in% ecoevents) %>%  
+  group_by(EVTYPE, Year) %>% 
+  summarise(freq = n_distinct(BGN_DATE), 
+            tot_prop = sum(PROP_COSTS),
+            tot_crop = sum(CROP_COSTS),
+            tot = (sum(PROP_COSTS) + sum(CROP_COSTS)) / 1000000000) %>% 
+  arrange( desc(tot))
+
+dataplotcosts %>% 
+  ggplot(aes(x=as.integer(Year), y= tot, color = EVTYPE))+
+  geom_line() +
+  labs (x = "Year", y= "Total costs of property and crop damage per billion", 
+        title="Economical damage due to severe weather events ",
+        subtitle = "Reported in the USA since 2000")
+
+```
+
+In this figure it becomes apparent that in 2006 floods was in this whole decade major reasons for economical burden and outranges by far all other most costly weather events. In the following years, cost due floods remain constantly high. However, in the end of 2000's two types of winds cause major property and crop damage, namely thunderstorm wind and tornados.
+
+
+
+
